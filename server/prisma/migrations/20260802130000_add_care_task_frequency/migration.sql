@@ -1,0 +1,1 @@
+ALTER TABLE `CareTask` ADD COLUMN `frequency` VARCHAR(191) NOT NULL DEFAULT 'Daily';

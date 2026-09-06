@@ -1,0 +1,403 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function hasProfile() {
+      return signedIn() && exists(userPath(request.auth.uid));
+    }
+
+    function currentUser() {
+      return get(userPath(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return hasProfile() &&
+        (
+          !('status' in currentUser()) ||
+          currentUser().status == 'ACTIVE' ||
+          currentUser().status == 'active' ||
+          currentUser().status == 'Active'
+        );
+    }
+
+    function isAdmin() {
+      return isActive() &&
+        (
+          currentUser().role == 'ADMIN' ||
+          currentUser().role == 'admin' ||
+          currentUser().role == 'Admin'
+        );
+    }
+
+    function isCaregiver() {
+      return isActive() &&
+        (
+          currentUser().role == 'CAREGIVER' ||
+          currentUser().role == 'caregiver' ||
+          currentUser().role == 'Caregiver'
+        );
+    }
+
+    function isFamily() {
+      return isActive() &&
+        (
+          currentUser().role == 'FAMILY' ||
+          currentUser().role == 'family' ||
+          currentUser().role == 'Family'
+        );
+    }
+
+    function isFamilyForResident(residentId) {
+      return isFamily() &&
+        ('familyProfile' in currentUser()) &&
+        currentUser().familyProfile.residentId == residentId;
+    }
+
+    function assignmentPath(residentId, caregiverId) {
+      return /databases/$(database)/documents/residentAssignments/$(residentId + '_' + caregiverId);
+    }
+
+    function isActiveCaregiverAssignment(residentId, caregiverId) {
+      return exists(assignmentPath(residentId, caregiverId)) &&
+        get(assignmentPath(residentId, caregiverId)).data.residentId == residentId &&
+        get(assignmentPath(residentId, caregiverId)).data.caregiverId == caregiverId &&
+        (
+          get(assignmentPath(residentId, caregiverId)).data.state == 'ASSIGNED' ||
+          get(assignmentPath(residentId, caregiverId)).data.state == 'assigned' ||
+          get(assignmentPath(residentId, caregiverId)).data.state == 'Assigned'
+        ) &&
+        (
+          !('unassignedAt' in get(assignmentPath(residentId, caregiverId)).data) ||
+          get(assignmentPath(residentId, caregiverId)).data.unassignedAt == null
+        );
+    }
+
+    function residentListsCaregiver(residentId, caregiverId) {
+      return exists(/databases/$(database)/documents/residents/$(residentId)) &&
+        ('assignedCaregiverIds' in get(
+          /databases/$(database)/documents/residents/$(residentId)
+        ).data) &&
+        caregiverId in get(
+          /databases/$(database)/documents/residents/$(residentId)
+        ).data.assignedCaregiverIds;
+    }
+
+    function isAssignedCaregiverForResident(residentId) {
+      return isCaregiver() &&
+        (
+          residentListsCaregiver(residentId, request.auth.uid) ||
+          isActiveCaregiverAssignment(residentId, request.auth.uid)
+        );
+    }
+
+    function canAccessResident(residentId) {
+      return isAdmin() ||
+        isFamilyForResident(residentId) ||
+        isAssignedCaregiverForResident(residentId);
+    }
+
+    function canAccessResidentResource(residentId) {
+      return isAdmin() ||
+        isFamilyForResident(residentId) ||
+        isAssignedCaregiverForResident(residentId);
+    }
+
+    function caregiverResidentUpdateKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'medicalNotes',
+        'updatedAt'
+      ]);
+    }
+
+    function careStatusUpdateKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'status',
+        'remark',
+        'timeCompleted',
+        'updatedById',
+        'updatedAt'
+      ]);
+    }
+
+    function careTaskEventCreateKeysOnly() {
+      return request.resource.data.keys().hasOnly([
+        'careTaskId',
+        'residentId',
+        'status',
+        'remark',
+        'timeCompleted',
+        'updatedById',
+        'updatedAt'
+      ]);
+    }
+
+    function careTaskPath(careTaskId) {
+      return /databases/$(database)/documents/careTasks/$(careTaskId);
+    }
+
+    function careTaskEventPath(eventId) {
+      return /databases/$(database)/documents/careTaskEvents/$(eventId);
+    }
+
+    function canAccessCareTaskById(careTaskId) {
+      return exists(careTaskPath(careTaskId)) &&
+        ('residentId' in get(careTaskPath(careTaskId)).data) &&
+        canAccessResident(get(careTaskPath(careTaskId)).data.residentId);
+    }
+
+    function canReadCareTaskEvent(eventId) {
+      return canAccessCareTaskById(eventId) ||
+        (
+          exists(careTaskEventPath(eventId)) &&
+          ('residentId' in resource.data) &&
+          canAccessResident(resource.data.residentId)
+        );
+    }
+
+    function careTaskEventStatusUpdateKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'careTaskId',
+        'residentId',
+        'status',
+        'remark',
+        'timeCompleted',
+        'updatedById',
+        'updatedAt'
+      ]);
+    }
+
+    function careTaskEventIdentityMatchesTask(eventId) {
+      return request.resource.data.careTaskId == eventId &&
+        exists(careTaskPath(eventId)) &&
+        request.resource.data.residentId == get(careTaskPath(eventId)).data.residentId &&
+        (
+          !('careTaskId' in resource.data) ||
+          resource.data.careTaskId == request.resource.data.careTaskId
+        ) &&
+        (
+          !('residentId' in resource.data) ||
+          resource.data.residentId == request.resource.data.residentId
+        );
+    }
+
+    function selfNotificationUpdateKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'readAt',
+        'updatedAt'
+      ]);
+    }
+
+    function conversationUpdateKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'lastMessage',
+        'lastMessageAt',
+        'updatedAt'
+      ]);
+    }
+
+    function messageUpdateKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'reads'
+      ]);
+    }
+
+    function isConversationMember() {
+      return isActive() && request.auth.uid in resource.data.memberIds;
+    }
+
+    function isParentConversationMember(conversationId) {
+      return isActive() &&
+        request.auth.uid in get(
+          /databases/$(database)/documents/conversations/$(conversationId)
+        ).data.memberIds;
+    }
+
+    function canCreateConversationNotification() {
+      return isActive() &&
+        ('data' in request.resource.data) &&
+        ('conversationId' in request.resource.data.data) &&
+        exists(
+          /databases/$(database)/documents/conversations/$(request.resource.data.data.conversationId)
+        ) &&
+        request.auth.uid in get(
+          /databases/$(database)/documents/conversations/$(request.resource.data.data.conversationId)
+        ).data.memberIds &&
+        request.resource.data.userId in get(
+          /databases/$(database)/documents/conversations/$(request.resource.data.data.conversationId)
+        ).data.memberIds;
+    }
+
+    function selfUserKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'username',
+        'familyProfile',
+        'caregiverProfile',
+        'notificationSetting',
+        'status',
+        'deletedAt',
+        'updatedAt'
+      ]);
+    }
+
+    match /users/{userId} {
+      allow read: if isActive();
+      allow create: if isAdmin();
+      allow update: if isAdmin() ||
+        (
+          isActive() &&
+          request.auth.uid == userId &&
+          selfUserKeysOnly() &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.email == resource.data.email
+        );
+      allow delete: if isAdmin();
+
+      match /pushTokens/{tokenId} {
+        allow read, write: if isAdmin() || (isActive() && request.auth.uid == userId);
+      }
+    }
+
+    match /facilityInfo/{documentId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    match /residents/{residentId} {
+      allow read: if canAccessResidentResource(residentId);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (
+          canAccessResidentResource(residentId) &&
+          caregiverResidentUpdateKeysOnly()
+        );
+    }
+
+    match /residentAssignments/{assignmentId} {
+      allow read: if isAdmin() ||
+        (isCaregiver() && resource.data.caregiverId == request.auth.uid) ||
+        isFamilyForResident(resource.data.residentId);
+      allow write: if isAdmin();
+    }
+
+    match /medications/{medicationId} {
+      allow read: if canAccessResident(resource.data.residentId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /medicationEvents/{eventId} {
+      allow read: if canAccessResident(resource.data.residentId);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (
+          canAccessResident(resource.data.residentId) &&
+          careStatusUpdateKeysOnly() &&
+          request.resource.data.updatedById == request.auth.uid
+        );
+    }
+
+    match /careTasks/{taskId} {
+      allow read: if canAccessResident(resource.data.residentId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /careTaskEvents/{eventId} {
+      allow read: if isAdmin() || canReadCareTaskEvent(eventId);
+      allow create: if isAdmin() ||
+        (
+          request.resource.data.careTaskId == eventId &&
+          canAccessResident(request.resource.data.residentId) &&
+          careTaskEventCreateKeysOnly() &&
+          request.resource.data.updatedById == request.auth.uid
+        );
+      allow update: if isAdmin() ||
+        (
+          canAccessResident(request.resource.data.residentId) &&
+          careTaskEventIdentityMatchesTask(eventId) &&
+          careTaskEventStatusUpdateKeysOnly() &&
+          request.resource.data.updatedById == request.auth.uid
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /caregiverActivityLogs/{logId} {
+      allow read: if isAdmin() ||
+        resource.data.caregiverId == request.auth.uid ||
+        canAccessResident(resource.data.residentId);
+      allow create: if isAdmin() ||
+        (
+          isCaregiver() &&
+          request.resource.data.caregiverId == request.auth.uid &&
+          canAccessResident(request.resource.data.residentId)
+        );
+      allow update, delete: if isAdmin();
+    }
+
+    match /caregiverTimeLogs/{logId} {
+      allow read: if isAdmin() ||
+        (isCaregiver() && resource.data.caregiverId == request.auth.uid);
+      allow create: if isCaregiver() &&
+        request.resource.data.caregiverId == request.auth.uid;
+      allow update: if isAdmin() ||
+        (isCaregiver() &&
+          resource.data.caregiverId == request.auth.uid &&
+          request.resource.data.caregiverId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if isConversationMember();
+      allow create: if isAdmin();
+      allow update: if isAdmin() ||
+        (
+          isConversationMember() &&
+          conversationUpdateKeysOnly()
+        );
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isParentConversationMember(conversationId);
+        allow create: if isParentConversationMember(conversationId) &&
+          request.resource.data.senderId == request.auth.uid;
+        allow update: if isParentConversationMember(conversationId) &&
+          messageUpdateKeysOnly();
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAdmin() ||
+        (isActive() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() ||
+        (isActive() && request.resource.data.userId == request.auth.uid) ||
+        canCreateConversationNotification();
+      allow update: if isAdmin() ||
+        (isActive() &&
+          resource.data.userId == request.auth.uid &&
+          request.resource.data.userId == request.auth.uid &&
+          selfNotificationUpdateKeysOnly());
+      allow delete: if isAdmin();
+    }
+
+    match /devicePushTokens/{tokenId} {
+      allow read: if isAdmin() ||
+        (isActive() && resource.data.userId == request.auth.uid);
+      allow create, update: if isActive() &&
+        request.resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin() ||
+        (isActive() && resource.data.userId == request.auth.uid);
+    }
+
+    match /medicineInventory/{itemId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+  }
+}

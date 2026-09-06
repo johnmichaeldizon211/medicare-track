@@ -1,0 +1,431 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CAREGIVER
+  FAMILY
+}
+
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+enum AssignmentState {
+  ASSIGNED
+  UNASSIGNED
+}
+
+enum ResidentStatus {
+  STABLE
+  NEEDS_ATTENTION
+  CRITICAL
+}
+
+enum MedicationStatus {
+  PENDING
+  TAKEN
+  MISSED
+  SKIPPED
+  DELAYED
+}
+
+enum CareTaskStatus {
+  PENDING
+  DONE
+  SKIPPED
+}
+
+enum CaregiverActivityType {
+  CARE_TASK
+  MEDICATION
+}
+
+enum OtpPurpose {
+  FORGOT_PASSWORD
+}
+
+enum ConversationType {
+  FAMILY
+  CAREGIVER
+}
+
+enum NotificationCategory {
+  MEDICATION_CARE_TASK
+  URGENT_ALERT
+  ADMIN_MESSAGE
+}
+
+model User {
+  id                    String                 @id @default(cuid())
+  email                 String                 @unique
+  username              String?                @unique
+  passwordHash          String
+  role                  Role
+  status                UserStatus             @default(ACTIVE)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  familyProfile         FamilyProfile?
+  caregiverProfile      CaregiverProfile?
+  refreshTokens         RefreshToken[]
+  passwordResetOtps     PasswordResetOtp[]
+  notificationSetting   NotificationSetting?
+  residentAssignments   ResidentAssignment[]
+  peerConversations     Conversation[]         @relation("ConversationPeer")
+  conversationMembers   ConversationMember[]
+  sentMessages          Message[]
+  messageReads          MessageRead[]
+  notifications         Notification[]
+  pushTokens            DevicePushToken[]
+  medicationEvents      MedicationEvent[]
+  careTaskEvents        CareTaskEvent[]
+  caregiverActivityLogs CaregiverActivityLog[]
+  createdMedications    Medication[]           @relation("MedicationCreatedBy")
+  assignedCareTasks     CareTask[]             @relation("CareTaskAssignedTo")
+  createdCareTasks      CareTask[]             @relation("CareTaskCreatedBy")
+  caregiverTimeLogs     CaregiverTimeLog[]
+}
+
+model FamilyProfile {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  residentId             String   @unique
+  contactName            String
+  relationship           String
+  contactNumber          String
+  secondaryContactNumber String?
+  address                String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resident               Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+}
+
+model CaregiverProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  displayName   String
+  contactNumber String?
+  address       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resident {
+  id                    String                 @id @default(cuid())
+  name                  String
+  room                  String
+  age                   Int
+  birthday              String?
+  gender                String?
+  address               String?
+  medicalNotes          String?
+  overallStatus         ResidentStatus         @default(STABLE)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  familyProfile         FamilyProfile?
+  conditions            ResidentCondition[]
+  assignments           ResidentAssignment[]
+  medications           Medication[]
+  medicationEvents      MedicationEvent[]
+  careTasks             CareTask[]
+  careTaskEvents        CareTaskEvent[]
+  caregiverActivityLogs CaregiverActivityLog[]
+  conversations         Conversation[]
+}
+
+model ResidentCondition {
+  id         String   @id @default(cuid())
+  residentId String
+  name       String
+  createdAt  DateTime @default(now())
+  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@index([residentId])
+}
+
+model ResidentAssignment {
+  id           String          @id @default(cuid())
+  residentId   String
+  caregiverId  String
+  state        AssignmentState @default(ASSIGNED)
+  assignedAt   DateTime        @default(now())
+  unassignedAt DateTime?
+  resident     Resident        @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  caregiver    User            @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+
+  @@index([residentId])
+  @@index([caregiverId])
+}
+
+model Medication {
+  id          String               @id @default(cuid())
+  residentId  String
+  name        String
+  dosage      String
+  type        String
+  frequency   String
+  startDate   DateTime
+  duration    String
+  createdById String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  resident    Resident             @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  createdBy   User                 @relation("MedicationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  reminders   MedicationReminder[]
+  events      MedicationEvent[]
+
+  @@index([residentId])
+  @@index([createdById])
+}
+
+model MedicationReminder {
+  id           String     @id @default(cuid())
+  medicationId String
+  time         String
+  meal         String
+  createdAt    DateTime   @default(now())
+  medication   Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+
+  @@index([medicationId])
+}
+
+model MedicationEvent {
+  id           String           @id @default(cuid())
+  medicationId String
+  residentId   String
+  scheduledAt  DateTime
+  status       MedicationStatus @default(PENDING)
+  remark       String?
+  updatedById  String?
+  updatedAt    DateTime         @updatedAt
+  medication   Medication       @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  resident     Resident         @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  updatedBy    User?            @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([residentId])
+  @@index([medicationId])
+}
+
+model MedicineInventoryItem {
+  id             String    @id @default(cuid())
+  name           String    @unique
+  count          Int       @default(0)
+  expirationDate DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model FacilityInfo {
+  id            String   @id
+  name          String   @default("Lifehouse Nursing Home")
+  contactNumber String?
+  email         String?
+  address       String?
+  updatedById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model CareTask {
+  id                  String         @id @default(cuid())
+  residentId          String
+  title               String
+  type                String
+  scheduledTime       String
+  frequency           String         @default("Daily")
+  assignedCaregiverId String?
+  createdById         String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  resident            Resident       @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  assignedCaregiver   User?          @relation("CareTaskAssignedTo", fields: [assignedCaregiverId], references: [id], onDelete: SetNull)
+  createdBy           User?          @relation("CareTaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  event               CareTaskEvent?
+
+  @@index([residentId])
+  @@index([assignedCaregiverId])
+}
+
+model CareTaskEvent {
+  id            String         @id @default(cuid())
+  careTaskId    String         @unique
+  residentId    String
+  status        CareTaskStatus @default(PENDING)
+  remark        String?
+  timeCompleted DateTime?
+  updatedById   String?
+  updatedAt     DateTime       @updatedAt
+  careTask      CareTask       @relation(fields: [careTaskId], references: [id], onDelete: Cascade)
+  resident      Resident       @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  updatedBy     User?          @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([residentId])
+}
+
+model CaregiverActivityLog {
+  id                String                @id @default(cuid())
+  caregiverId       String
+  residentId        String
+  activityType      CaregiverActivityType
+  itemTitle         String
+  itemDetails       String?
+  completedAt       DateTime              @default(now())
+  medicationEventId String?
+  careTaskEventId   String?
+  createdAt         DateTime              @default(now())
+  caregiver         User                  @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  resident          Resident              @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@index([caregiverId, completedAt])
+  @@index([residentId, completedAt])
+  @@index([activityType, completedAt])
+  @@index([medicationEventId])
+  @@index([careTaskEventId])
+}
+
+model CaregiverTimeLog {
+  id           String    @id @default(cuid())
+  caregiverId  String
+  timeIn       DateTime  @default(now())
+  timeOut      DateTime?
+  totalMinutes Int?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  caregiver    User      @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+
+  @@index([caregiverId, timeIn])
+  @@index([timeOut])
+}
+
+model Conversation {
+  id         String               @id @default(cuid())
+  residentId String?
+  type       ConversationType     @default(FAMILY)
+  peerId     String
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  resident   Resident?            @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  peer       User                 @relation("ConversationPeer", fields: [peerId], references: [id], onDelete: Cascade)
+  members    ConversationMember[]
+  messages   Message[]
+
+  @@unique([peerId, type])
+  @@index([peerId])
+  @@index([residentId, type])
+}
+
+model ConversationMember {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  lastReadAt     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String        @db.Text
+  createdAt      DateTime      @default(now())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  reads          MessageRead[]
+
+  @@index([conversationId, createdAt])
+}
+
+model MessageRead {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId])
+}
+
+model PasswordResetOtp {
+  id         String     @id @default(cuid())
+  userId     String
+  email      String
+  code       String
+  purpose    OtpPurpose @default(FORGOT_PASSWORD)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime   @default(now())
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, code])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model NotificationSetting {
+  id                                 String   @id @default(cuid())
+  userId                             String   @unique
+  pushEnabled                        Boolean  @default(true)
+  soundEnabled                       Boolean  @default(true)
+  vibrationEnabled                   Boolean  @default(true)
+  medicationCareTaskRemindersEnabled Boolean  @default(true)
+  urgentAlertsEnabled                Boolean  @default(true)
+  adminMessagesEnabled               Boolean  @default(true)
+  updatedAt                          DateTime @updatedAt
+  user                               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String               @id @default(cuid())
+  userId    String
+  category  NotificationCategory
+  title     String
+  body      String               @db.Text
+  data      Json?
+  sourceKey String?              @unique
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([category, createdAt])
+}
+
+model DevicePushToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique @db.VarChar(512)
+  platform   String
+  isActive   Boolean  @default(true)
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+}

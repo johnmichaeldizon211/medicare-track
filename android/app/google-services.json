@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "750611042559",
+    "project_id": "medicare-track-af1cf",
+    "storage_bucket": "medicare-track-af1cf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:750611042559:android:280fff3c2dfb638ac9fcca",
+        "android_client_info": {
+          "package_name": "com.lifehouse.medicaretrack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD875qAvneFmdKTtxy7IYeuexEpzK-XjOg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

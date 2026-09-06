@@ -1,0 +1,1 @@
+ALTER TABLE `Resident` ADD COLUMN `birthday` VARCHAR(191) NULL;
